@@ -1,9 +1,9 @@
-from flask import Flask, jsonify,request
+from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
 from flask_mysqldb import MySQL
 
 app = Flask(__name__)
-CORS(app)  
+CORS(app)
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = ''
@@ -14,40 +14,59 @@ mysql = MySQL(app)
 @app.route('/signup', methods=['POST'])
 @cross_origin()
 def signup():
-    user = request.json.get('data')
-    name = user['name']
-    email = user['email']
-    role = user['role']
-    year = user['year']
-    password = user['password']
-   
-    cursor = mysql.connection.cursor()
+    try:
+        data = request.json.get('data')
+        name = data.get('name')
+        email = data.get('email')
+        role = data.get('role')  
+        year = data.get('year')
+        password = data.get('password')
 
-    cursor.execute(f"INSERT INTO users (name,email,role,year,password) VALUES (%s,%s,%s,%s,%s)",(name,email,role,year,password))
-    mysql.connection.commit()
-    cursor.close()
+        cursor = mysql.connection.cursor()
+        cursor.execute("INSERT INTO users (name, email, role, year, password) VALUES (%s,%s,%s,%s,%s)",
+                       (name, email, role, year, password))
+        mysql.connection.commit()
+        cursor.close()
 
-    return {"user":"added succesfully"}
+        return jsonify({"msg": "Signup successful"}), 201
+    except Exception as e:
+        print("Error in signup:", e)
+        return jsonify({"msg": str(e)}), 500
 
 @app.route('/login', methods=['POST'])
 @cross_origin()
 def login():
-    data = request.json.get('data')  
-    email = data['email']
-    password = data['password']
+    try:
+        data = request.json.get('data')
+        email = data.get('email')
+        password = data.get('password')
 
-    cursor = mysql.connection.cursor()
-    cursor.execute(f"SELECT * FROM users WHERE email=%s AND password=%s", (email, password,))
-    user = cursor.fetchone()
+        cursor = mysql.connection.cursor()
+        cursor.execute("SELECT lgid, name, email, role, year, password FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        cursor.close()
 
-    print(user)
-    if user:
-        return jsonify({"msg": "Login successful", "user": {"name": user[1], "email": user[2], "role": user[3], "year": user[4]}})
-    else:
-        return jsonify({"msg": "Invalid email or password"}), 401
+        if not user:
+            return jsonify({"msg": "User not found"}), 404
 
-    cursor.close()
+        user_id, name, email, role, year, stored_pw = user
 
+        if stored_pw != password:
+            return jsonify({"msg": "Invalid credentials"}), 401
+
+        return jsonify({
+            "msg": "Login successful",
+            "user": {
+                "lgid": user_id,
+                "name": name,
+                "email": email,
+                "role": role,  # Matches frontend roles exactly
+                "year": year
+            }
+        }), 200
+    except Exception as e:
+        print("Error in login:", e)
+        return jsonify({"msg": str(e)}), 500
 
 @app.route('/add_report', methods=['POST'])
 @cross_origin()
@@ -64,12 +83,12 @@ def add_report():
     submitted_by = report['submitted_by']
 
     cursor = mysql.connection.cursor()
-
-    cursor.execute(f"INSERT INTO reports (id,lab,item,quantity,status,issue,notes,image_path,submitted_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",(user_id,lab,item,quantity,status,issue,notes,image,submitted_by))
+    cursor.execute("INSERT INTO reports (id,lab,item,quantity,status,issue,notes,image_path,submitted_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                   (user_id, lab, item, quantity, status, issue, notes, image, submitted_by))
     mysql.connection.commit()
     cursor.close()
 
-    return {"report":"added succesfully"}
+    return {"report": "added succesfully"}
 
 @app.route('/get_reports', methods=['GET'])
 @cross_origin()
@@ -87,7 +106,6 @@ def get_reports():
     except Exception as e:
         print("Error fetching reports:", e)
         return jsonify({"error": str(e)}), 500
-    
 
 @app.route('/dashboard_data', methods=['GET'])
 @cross_origin()
@@ -100,7 +118,7 @@ def dashboard_data():
     cursor.execute("""
         SELECT item, COUNT(*) as count 
         FROM reports 
-        WHERE issue = 'Damaged'
+        WHERE status = 'Damaged'
         GROUP BY item
     """)
     damaged = [{"item": row[0], "count": row[1]} for row in cursor.fetchall()]
@@ -108,15 +126,15 @@ def dashboard_data():
     cursor.execute("""
         SELECT item, COUNT(*) as count 
         FROM reports 
-        WHERE issue = 'Missing'
+        WHERE status = 'Missing'
         GROUP BY item
     """)
     missing = [{"item": row[0], "count": row[1]} for row in cursor.fetchall()]
 
     cursor.execute("""
         SELECT lab,
-               SUM(CASE WHEN issue = 'Damaged' THEN 1 ELSE 0 END) as damaged,
-               SUM(CASE WHEN issue = 'Missing' THEN 1 ELSE 0 END) as missing
+               SUM(CASE WHEN status = 'Damaged' THEN 1 ELSE 0 END) as damaged,
+               SUM(CASE WHEN status = 'Missing' THEN 1 ELSE 0 END) as missing
         FROM reports
         GROUP BY lab
     """)
@@ -127,8 +145,7 @@ def dashboard_data():
         FROM reports
         GROUP BY status
     """)
-    operational_stats = [{"status": row[0], "count": row[1]} for row in cursor.fetchall()]
-
+    operational_stats = [{"label": row[0], "count": row[1]} for row in cursor.fetchall()]
 
     cursor.execute("""
         SELECT item, lab, COUNT(*) as count, status
@@ -138,7 +155,6 @@ def dashboard_data():
     icon_map = {
         "Laptop": "laptop",
         "Desktop": "desktop",
-        "Chair": "chair",
         "Plug": "plug",
         "Projector": "video"
     }
@@ -159,12 +175,7 @@ def dashboard_data():
         "labDamage": lab_damage,
         "inventory": inventory,
         "operational_stats": operational_stats
-
     })
-
-
-
-    
 
 if __name__ == '__main__':
     app.run(debug=True)
