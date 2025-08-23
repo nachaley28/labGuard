@@ -1,13 +1,19 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request,session
 from flask_cors import CORS, cross_origin
 from flask_mysqldb import MySQL
+from flask_session import Session
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = ''
 app.config['MYSQL_DB'] = 'labguard'
+
+app.secret_key = 'labguardsecurity'
+
+app.config['SESSION_TYPE'] = 'filesystem'
+Session(app)
 
 mysql = MySQL(app)
 
@@ -48,12 +54,14 @@ def login():
 
         if not user:
             return jsonify({"msg": "User not found"}), 404
+        session['user'] = user
 
         user_id, name, email, role, year, stored_pw = user
 
         if stored_pw != password:
             return jsonify({"msg": "Invalid credentials"}), 401
-
+        
+        
         return jsonify({
             "msg": "Login successful",
             "user": {
@@ -67,6 +75,7 @@ def login():
     except Exception as e:
         print("Error in login:", e)
         return jsonify({"msg": str(e)}), 500
+
 
 @app.route('/add_report', methods=['POST'])
 @cross_origin()
@@ -177,5 +186,41 @@ def dashboard_data():
         "operational_stats": operational_stats
     })
 
+@app.route('/get_inventory', methods=["GET"])
+@cross_origin()
+def get_inventory():
+    final_data = []
+    user = session.get('user')
+    cursor = mysql.connection.cursor()
+    cursor.execute("SELECT * FROM inventory")
+    data = cursor.fetchall()
+
+    for  result in data:
+        item = {
+            
+            'id' : result[0],
+            'category' : result[1],
+            'name' : result[2],
+            'lab' : result[3],
+            'specs' : result[4],
+            'quantity' : result[5],
+            'status': result[6]
+        }
+        final_data.append(item)
+    
+    return final_data,user,
+
+
+
 if __name__ == '__main__':
     app.run(debug=True)
+
+
+
+
+
+
+
+
+
+
